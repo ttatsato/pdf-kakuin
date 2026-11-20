@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF角印スタンプ</title>
+<style>
+  :root {
+    --bg: #f3f2ef; --panel: #ffffff; --fg: #1f1d1a; --muted: #6b6760;
+    --line: #dcd8d0; --accent: #b3261e; --accent-fg: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1a18; --panel: #262421; --fg: #ece9e3; --muted: #a29d94;
+            --line: #3a3733; --accent: #e0574e; --accent-fg: #fff; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--fg);
+         font: 14px/1.5 -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+         display: grid; grid-template-columns: 300px 1fr; }
+  aside { background: var(--panel); border-right: 1px solid var(--line);
+          padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+  h1 { font-size: 18px; margin: 0; }
+  h1 span { color: var(--accent); }
+  .step { display: flex; flex-direction: column; gap: 8px; }
+  .step > label.title, .step > .title { font-weight: 600; font-size: 13px; }
+  .drop { border: 1.5px dashed var(--line); border-radius: 8px; padding: 14px;
+          text-align: center; color: var(--muted); cursor: pointer; font-size: 13px; }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--fg); }
+  .drop input { display: none; }
+  .drop .name { color: var(--fg); word-break: break-all; }
+  #sealPreview { max-width: 96px; max-height: 96px; margin: 6px auto 0; display: block;
+                 background: repeating-conic-gradient(var(--line) 0 25%, transparent 0 50%) 0 0/12px 12px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .row input[type=range] { flex: 1; }
+  .row output { width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .tabs label { text-align: center; padding: 7px; cursor: pointer; }
+  .tabs input { display: none; }
+  .tabs label:has(input:checked) { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+  textarea, select { font: inherit; padding: 8px; border-radius: 6px; border: 1px solid var(--line);
+                     background: var(--panel); color: var(--fg); }
+  textarea { resize: vertical; min-height: 60px; }
+  input[type=color] { width: 40px; height: 30px; border: 1px solid var(--line); border-radius: 4px; padding: 0; background: none; }
+  button { font: inherit; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--fg); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--fg); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0; }
+  main { overflow: auto; padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 24px; }
+  .empty { margin: auto; color: var(--muted); text-align: center; }
+  .page { position: relative; box-shadow: 0 1px 4px rgba(0,0,0,.18); background: #fff; cursor: crosshair; }
+  .page canvas { display: block; }
+  .page .num { position: absolute; top: -20px; left: 0; font-size: 12px; color: var(--muted); }
+  .stamp { position: absolute; cursor: move; outline: 1px dashed transparent; touch-action: none; }
+  .stamp:hover, .stamp.drag { outline-color: var(--accent); }
+  .stamp img { width: 100%; height: 100%; display: block; pointer-events: none; user-select: none; }
+  .stamp .del { position: absolute; top: -10px; right: -10px; width: 20px; height: 20px; padding: 0;
+                border-radius: 50%; background: var(--accent); color: #fff; border: none;
+                font-size: 12px; line-height: 20px; display: none; }
+  .stamp:hover .del { display: block; }
+  @media (max-width: 720px) { body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    aside { border-right: none; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<aside>
+  <h1><span>■</span> PDF角印スタンプ</h1>
+
+  <div class="step">
+    <label class="title">1. PDFを選択</label>
+    <label class="drop" id="pdfDrop">
+      <input type="file" id="pdfInput" accept="application/pdf">
+      <div id="pdfName">クリックまたはドロップ</div>
+    </label>
+  </div>
+
+  <div class="step">
+    <div class="title">2. 押すもの</div>
+    <div class="tabs">
+      <label><input type="radio" name="mode" value="seal" checked> 角印</label>
+      <label><input type="radio" name="mode" value="text"> テキスト</label>
+    </div>
+  </div>
+
+  <div class="step" id="sealPanel">
+    <label class="title">角印画像（PNG / JPG）</label>
+    <label class="drop" id="sealDrop">
+      <input type="file" id="sealInput" accept="image/png,image/jpeg">
+      <div id="sealName">クリックまたはドロップ</div>
+      <img id="sealPreview" hidden alt="">
+    </label>
+    <label class="row"><input type="checkbox" id="whiteToAlpha"> 白い背景を透過する</label>
+    <div class="row">サイズ <input type="range" id="size" min="10" max="60" step="0.5" value="24"><output id="sizeOut">24mm</output></div>
+    <p class="hint">角印は一般的に 21〜24mm 程度です。</p>
+  </div>
+
+  <div class="step" id="textPanel" hidden>
+    <label class="title" for="textInput">テキスト</label>
+    <textarea id="textInput" placeholder="例：2026年11月20日">2026年11月20日</textarea>
+    <div class="row">文字サイズ <input type="range" id="fontSize" min="6" max="48" step="1" value="12"><output id="fontSizeOut">12pt</output></div>
+    <div class="row">
+      <select id="fontFamily">
+        <option value='"Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif'>ゴシック</option>
+        <option value='"Hiragino Mincho ProN", "Noto Serif JP", "Yu Mincho", serif'>明朝</option>
+      </select>
+      <input type="color" id="textColor" value="#000000" title="文字色">
+    </div>
+    <p class="hint">設定はクリックした時点の内容で押されます。</p>
+  </div>
+
+  <div class="step">
+    <div class="row">濃さ <input type="range" id="opacity" min="0.2" max="1" step="0.05" value="1"><output id="opOut">100%</output></div>
+  </div>
+
+  <div class="step">
+    <div class="title">3. 押す</div>
+    <p class="hint">ページをクリックするとその位置に押します。ドラッグで移動、× で削除。</p>
+    <button id="copyAll" disabled>最後に押したものを全ページに複製</button>
+    <button id="clearAll" disabled>すべて削除</button>
+  </div>
+
+  <button class="primary" id="save" disabled>押印済みPDFを保存</button>
+  <p class="hint">処理はすべてブラウザ内で行われ、ファイルはどこにも送信されません。</p>
+</aside>
+
+<main id="viewer"><div class="empty">PDFを選択するとここに表示されます</div></main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const MM_TO_PT = 72 / 25.4;
+const TEXT_PX_PER_PT = 8;  // テキスト画像の解像度（576dpi相当）
+const $ = (id) => document.getElementById(id);
+
+let pdfBytes = null, pdfName = "document.pdf";
+let pages = [];          // { el, scale }
+// 角印: { type:"seal", page, cx, cy }
+// テキスト: { type:"text", page, cx, cy, url, wPt, hPt }
+// cx, cy はページ幅・高さに対する中心位置の比率
+let stamps = [];
+let sealRaw = null, sealUrl = null;
+let lastStamp = null;
+
+const sizeMm = () => parseFloat($("size").value);
+const opacity = () => parseFloat($("opacity").value);
+const mode = () => document.querySelector('input[name=mode]:checked').value;
+
+// ---------- モード切替 ----------
+document.querySelectorAll('input[name=mode]').forEach((r) => r.addEventListener("change", () => {
+  $("sealPanel").hidden = mode() !== "seal";
+  $("textPanel").hidden = mode() !== "text";
+}));
+
+// ---------- ファイル入力 ----------
+function setupDrop(dropEl, inputEl, onFile) {
+  inputEl.addEventListener("change", () => inputEl.files[0] && onFile(inputEl.files[0]));
+  dropEl.addEventListener("dragover", (e) => { e.preventDefault(); dropEl.classList.add("over"); });
+  dropEl.addEventListener("dragleave", () => dropEl.classList.remove("over"));
+  dropEl.addEventListener("drop", (e) => {
+    e.preventDefault(); dropEl.classList.remove("over");
+    if (e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]);
+  });
+}
+
+setupDrop($("pdfDrop"), $("pdfInput"), async (file) => {
+  pdfName = file.name;
+  $("pdfName").innerHTML = `<span class="name">${escapeHtml(file.name)}</span>`;
+  pdfBytes = new Uint8Array(await file.arrayBuffer());
+  stamps = []; lastStamp = null;
+  await renderPdf();
+  refresh();
+});
+
+setupDrop($("sealDrop"), $("sealInput"), (file) => {
+  const r = new FileReader();
+  r.onload = async () => {
+    sealRaw = r.result;
+    $("sealName").innerHTML = `<span class="name">${escapeHtml(file.name)}</span>`;
+    await processSeal();
+  };
+  r.readAsDataURL(file);
+});
+
+$("whiteToAlpha").addEventListener("change", () => sealRaw && processSeal());
+
+// 画像を PNG に正規化（必要なら白を透過）
+async function processSeal() {
+  const img = await loadImage(sealRaw);
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  if ($("whiteToAlpha").checked) {
+    const d = ctx.getImageData(0, 0, c.width, c.height);
+    const p = d.data;
+    for (let i = 0; i < p.length; i += 4) {
+      const min = Math.min(p[i], p[i + 1], p[i + 2]);
+      if (min > 200) p[i + 3] = Math.round(p[i + 3] * (255 - min) / 55); // 白に近いほど透明
+    }
+    ctx.putImageData(d, 0, 0);
+  }
+  sealUrl = c.toDataURL("image/png");
+  $("sealPreview").src = sealUrl;
+  $("sealPreview").hidden = false;
+  drawStamps();
+  refresh();
+}
+
+// テキストを透過PNGにする（日本語フォントを埋め込まずに済むよう画像化）
+function makeTextImage(text, sizePt, color, family) {
+  const lines = text.split("\n");
+  const px = sizePt * TEXT_PX_PER_PT;
+  const lineH = px * 1.3;
+  const font = `${px}px ${family}`;
+  const c = document.createElement("canvas");
+  const ctx = c.getContext("2d");
+  ctx.font = font;
+  const w = Math.ceil(Math.max(...lines.map((l) => ctx.measureText(l).width), 1));
+  c.width = w + 4;
+  c.height = Math.ceil(lineH * lines.length);
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textBaseline = "middle";
+  lines.forEach((l, i) => ctx.fillText(l, 2, lineH * (i + 0.5)));
+  return { url: c.toDataURL("image/png"), wPt: c.width / TEXT_PX_PER_PT, hPt: c.height / TEXT_PX_PER_PT };
+}
+
+// ---------- PDF 表示 ----------
+async function renderPdf() {
+  const viewer = $("viewer");
+  viewer.innerHTML = "";
+  pages = [];
+  const doc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+  const maxW = Math.min(900, viewer.clientWidth - 48);
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const base = page.getViewport({ scale: 1, rotation: 0 });
+    const scale = maxW / base.width;
+    const vp = page.getViewport({ scale, rotation: 0 });
+    const dpr = window.devicePixelRatio || 1;
+
+    const wrap = document.createElement("div");
+    wrap.className = "page";
+    wrap.style.width = vp.width + "px";
+    wrap.style.height = vp.height + "px";
+    wrap.innerHTML = `<div class="num">${i} / ${doc.numPages}</div>`;
+    const canvas = document.createElement("canvas");
+    canvas.width = vp.width * dpr; canvas.height = vp.height * dpr;
+    canvas.style.width = vp.width + "px"; canvas.style.height = vp.height + "px";
+    wrap.appendChild(canvas);
+    viewer.appendChild(wrap);
+
+    await page.render({
+      canvasContext: canvas.getContext("2d"),
+      viewport: page.getViewport({ scale: scale * dpr, rotation: 0 }),
+    }).promise;
+
+    const idx = i - 1;
+    pages.push({ el: wrap, scale });
+    wrap.addEventListener("click", (e) => {
+      if (e.target.closest(".stamp")) return;
+      const r = wrap.getBoundingClientRect();
+      addStamp(idx, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+    });
+  }
+}
+
+// ---------- スタンプ ----------
+function addStamp(page, cx, cy) {
+  let s;
+  if (mode() === "seal") {
+    if (!sealUrl) return;
+    s = { type: "seal", page, cx, cy };
+  } else {
+    const text = $("textInput").value.replace(/\s+$/, "");
+    if (!text) return;
+    s = { type: "text", page, cx, cy,
+          ...makeTextImage(text, parseFloat($("fontSize").value), $("textColor").value, $("fontFamily").value) };
+  }
+  stamps.push(s); lastStamp = s;
+  drawStamps(); refresh();
+}
+
+// スタンプの PDF 上のサイズ（pt）
+function stampSizePt(s) {
+  if (s.type === "seal") { const v = sizeMm() * MM_TO_PT; return { w: v, h: v }; }
+  return { w: s.wPt, h: s.hPt };
+}
+
+function drawStamps() {
+  document.querySelectorAll(".stamp").forEach((n) => n.remove());
+  stamps.forEach((s) => {
+    const pg = pages[s.page];
+    const url = s.type === "seal" ? sealUrl : s.url;
+    if (!pg || !url) return;
+    const { w, h } = stampSizePt(s);
+    const el = document.createElement("div");
+    el.className = "stamp";
+    el.style.width = w * pg.scale + "px";
+    el.style.height = h * pg.scale + "px";
+    el.style.opacity = opacity();
+    el.innerHTML = `<img src="${url}" alt=""><button class="del" title="削除">×</button>`;
+    place(el, s, pg.el.clientWidth, pg.el.clientHeight);
+    el.querySelector(".del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      stamps = stamps.filter((x) => x !== s);
+      if (lastStamp === s) lastStamp = stamps[stamps.length - 1] || null;
+      drawStamps(); refresh();
+    });
+    enableDrag(el, s, pg);
+    pg.el.appendChild(el);
+  });
+}
+
+function place(el, s, pageW, pageH) {
+  el.style.left = (s.cx * pageW - parseFloat(el.style.width) / 2) + "px";
+  el.style.top = (s.cy * pageH - parseFloat(el.style.height) / 2) + "px";
+}
+
+function enableDrag(el, s, pg) {
+  el.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".del")) return;
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("drag");
+    const r = pg.el.getBoundingClientRect();
+    const offX = e.clientX - (r.left + s.cx * r.width);
+    const offY = e.clientY - (r.top + s.cy * r.height);
+    const move = (ev) => {
+      s.cx = clamp((ev.clientX - offX - r.left) / r.width, 0, 1);
+      s.cy = clamp((ev.clientY - offY - r.top) / r.height, 0, 1);
+      place(el, s, r.width, r.height);
+    };
+    const up = () => {
+      el.classList.remove("drag");
+      lastStamp = s;
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  });
+}
+
+$("size").addEventListener("input", () => { $("sizeOut").textContent = sizeMm() + "mm"; drawStamps(); });
+$("opacity").addEventListener("input", () => { $("opOut").textContent = Math.round(opacity() * 100) + "%"; drawStamps(); });
+$("fontSize").addEventListener("input", () => { $("fontSizeOut").textContent = $("fontSize").value + "pt"; });
+
+$("copyAll").addEventListener("click", () => {
+  if (!lastStamp) return;
+  const src = lastStamp;
+  pages.forEach((_, i) => {
+    if (i === src.page) return;
+    const dup = stamps.some((s) => s.page === i && s.type === src.type && s.url === src.url &&
+      Math.abs(s.cx - src.cx) < 1e-3 && Math.abs(s.cy - src.cy) < 1e-3);
+    if (!dup) stamps.push({ ...src, page: i });
+  });
+  drawStamps(); refresh();
+});
+
+$("clearAll").addEventListener("click", () => { stamps = []; lastStamp = null; drawStamps(); refresh(); });
+
+// ---------- 保存 ----------
+$("save").addEventListener("click", async () => {
+  const btn = $("save");
+  btn.disabled = true; btn.textContent = "作成中…";
+  try {
+    const doc = await PDFLib.PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    const docPages = doc.getPages();
+    const cache = new Map();  // 同じ画像は1回だけ埋め込む
+    for (const s of stamps) {
+      const url = s.type === "seal" ? sealUrl : s.url;
+      if (!url) continue;
+      if (!cache.has(url)) cache.set(url, await doc.embedPng(url));
+      const p = docPages[s.page];
+      const box = p.getCropBox();
+      const { w, h } = stampSizePt(s);
+      const cx = box.x + s.cx * box.width;
+      const cy = box.y + (1 - s.cy) * box.height; // PDFは左下原点
+      p.drawImage(cache.get(url), { x: cx - w / 2, y: cy - h / 2, width: w, height: h, opacity: opacity() });
+    }
+    const out = await doc.save();
+    const blobUrl = URL.createObjectURL(new Blob([out], { type: "application/pdf" }));
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = pdfName.replace(/\.pdf$/i, "") + "_押印.pdf";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  } catch (err) {
+    console.error(err);
+    alert("PDFの保存に失敗しました: " + err.message);
+  } finally {
+    btn.textContent = "押印済みPDFを保存";
+    refresh();
+  }
+});
+
+// ---------- ユーティリティ ----------
+function refresh() {
+  $("save").disabled = !(pdfBytes && stamps.length);
+  $("copyAll").disabled = !(lastStamp && pages.length > 1);
+  $("clearAll").disabled = !stamps.length;
+}
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function loadImage(src) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+}
+function escapeHtml(s) { return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+</script>
+</body>
+</html>
